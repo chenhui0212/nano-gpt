@@ -10,6 +10,7 @@ eval_interval = 300
 learning_rate = 1e-2
 device = "cuda" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
+embed_dim = 32
 
 torch.manual_seed(1337)
 
@@ -55,25 +56,33 @@ def estimate_loss(model):
     model.train()
     return out
 
-# super simple bigram model
-class BigramLanguageModel(nn.Module):
+class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.lm_head = nn.Linear(embed_dim, vocab_size)
 
-    def forward(self, idx, targets):
+    def forward(self, idx, targets=None):
         # idx and targets are both (B,T) tensor
-        logits = self.token_embedding_table(idx)  # (B,T,C)
-        logits = logits.view(-1, self.token_embedding_table.embedding_dim)
-        targets = targets.view(-1)
-        loss = F.cross_entropy(logits, targets)
+        token_emb = self.token_embedding(idx)  # (B,T,C)
+        logits = self.lm_head(token_emb)  # (B,T,vocab_size)
+
+        # calculate the loss
+        if targets is not None:
+            _, _, C = logits.shape
+            logits = logits.view(-1, C)
+            targets = targets.view(-1)
+            loss = F.cross_entropy(logits, targets)
+        else:
+            loss = None
+
         return logits, loss
 
     def generate(self, idx, max_token):
         # idx is (B,T) array of indices in the current context
         for _ in range(max_token):
             # get the predictions
-            logits = self.token_embedding_table(idx)
+            logits, _ = self(idx)
             # focus only on the last time step
             logits = logits[:, -1, :]  # (B,C)
             # apply softmax to get probabilities
@@ -84,16 +93,17 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)  # (B,T+1)
         return idx
 
+
 # create the model and optimizer
-model = BigramLanguageModel().to(device)
+model = GPTLanguageModel().to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 # training loop
 for iter in range(max_iters):
     xb, yb = get_batch("train")
 
-    logits, loss = model(xb, yb)
     optimizer.zero_grad()
+    logits, loss = model(xb, yb)
     loss.backward()
     optimizer.step()
 
