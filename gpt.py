@@ -11,6 +11,7 @@ learning_rate = 1e-2
 device = "cuda" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
 embed_dim = 32
+max_seq_len = 1024
 
 torch.manual_seed(1337)
 
@@ -60,11 +61,15 @@ class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.positional_encoding = nn.Embedding(max_seq_len, embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(self, idx, targets=None):
         # idx and targets are both (B,T) tensor
+        _, T = idx.shape
         token_emb = self.token_embedding(idx)  # (B,T,C)
+        pos_enc = self.positional_encoding(torch.arange(T, device=device))  # (T,C)
+        token_emb += pos_enc
         logits = self.lm_head(token_emb)  # (B,T,vocab_size)
 
         # calculate the loss
