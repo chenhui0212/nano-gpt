@@ -80,13 +80,21 @@ class Head(nn.Module):
         out = probs @ values
         return out
 
+class MultiHead(nn.Module):
+    def __init__(self, head_num, head_dim):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_dim) for _ in range(head_num)])
+
+    def forward(self, input, attn_mask=None):
+        return torch.cat([head(input, attn_mask) for head in self.heads], dim=-1)
+
 class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         self.positional_encoding = nn.Embedding(block_size, embed_dim)
         self.mask = torch.tril(torch.ones((block_size, block_size), device=device))
-        self.self_attn_head = Head(embed_dim)
+        self.self_attn_head = MultiHead(4, embed_dim // 4)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(self, idx, targets=None):
