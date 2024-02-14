@@ -11,6 +11,7 @@ learning_rate = 1e-3
 device = "cuda" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
 embed_dim = 32
+ff_dim = 32
 
 torch.manual_seed(1337)
 
@@ -88,6 +89,18 @@ class MultiHead(nn.Module):
     def forward(self, input, attn_mask=None):
         return torch.cat([head(input, attn_mask) for head in self.heads], dim=-1)
 
+class FeedForward(nn.Module):
+    def __init__(self, embed_dim, ff_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(embed_dim, ff_dim),
+            nn.ReLU(),
+            nn.Linear(ff_dim, embed_dim),
+        )
+
+    def forward(self, input):
+        return self.net(input)
+
 class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -95,6 +108,7 @@ class GPTLanguageModel(nn.Module):
         self.positional_encoding = nn.Embedding(block_size, embed_dim)
         self.mask = torch.tril(torch.ones((block_size, block_size), device=device))
         self.self_attn_head = MultiHead(4, embed_dim // 4)
+        self.feed_fordward = FeedForward(embed_dim, ff_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -105,7 +119,8 @@ class GPTLanguageModel(nn.Module):
         pos_enc = self.positional_encoding(torch.arange(T, device=device))  # (T,C)
         token_emb = token_emb + pos_enc  # (B,T,C)
         attn = self.self_attn_head(token_emb, self.mask)  # (B,T,C)
-        logits = self.lm_head(attn)  # (B,T,vocab_size)
+        ffn = self.feed_fordward(attn)  # (B,T,C)
+        logits = self.lm_head(ffn)  # (B,T,vocab_size)
 
         # calculate the loss
         if targets is not None:
