@@ -5,13 +5,12 @@ import torch.nn.functional as F
 # hyperparameters
 batch_size = 32
 block_size = 8
-max_iters = 3000
-eval_interval = 300
-learning_rate = 1e-2
+max_iters = 5000
+eval_interval = 500
+learning_rate = 1e-3
 device = "cuda" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
 embed_dim = 32
-max_seq_len = 1024
 
 torch.manual_seed(1337)
 
@@ -57,20 +56,48 @@ def estimate_loss(model):
     model.train()
     return out
 
+class Head(nn.Module):
+    def __init__(self, head_dim):
+        super().__init__()
+        self.query = nn.Linear(embed_dim, head_dim, bias=False)
+        self.key = nn.Linear(embed_dim, head_dim, bias=False)
+        self.value = nn.Linear(embed_dim, head_dim, bias=False)
+        self.scale_factor = head_dim ** 0.5
+
+    def forward(self, input, attn_mask=None):
+        _, T, _ = input.shape
+        queries = self.query(input)
+        keys = self.key(input)
+        values = self.value(input)
+
+        # calculate attention scores
+        scores = (queries @ keys.transpose(-2, -1)) / self.scale_factor
+        if attn_mask is not None:
+            scores = scores.masked_fill(attn_mask[:T, :T] == 0, float("-inf"))
+
+        # perform the weighted aggregation of the values
+        probs = F.softmax(scores, dim=-1)
+        out = probs @ values
+        return out
+
 class GPTLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.positional_encoding = nn.Embedding(max_seq_len, embed_dim)
+        self.positional_encoding = nn.Embedding(block_size, embed_dim)
+        self.mask = torch.tril(torch.ones((block_size, block_size), device=device))
+        self.self_attn_head = Head(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(self, idx, targets=None):
-        # idx and targets are both (B,T) tensor
         _, T = idx.shape
+
+        # idx and targets are both (B,T) tensor
         token_emb = self.token_embedding(idx)  # (B,T,C)
         pos_enc = self.positional_encoding(torch.arange(T, device=device))  # (T,C)
-        token_emb += pos_enc
-        logits = self.lm_head(token_emb)  # (B,T,vocab_size)
+        token_emb = token_emb + pos_enc  # (B,T,C)
+        attn = self.self_attn_head(token_emb, self.mask)  # (B,T,C)
+        logits = self.lm_head(attn)  # (B,T,vocab_size)
 
         # calculate the loss
         if targets is not None:
@@ -86,8 +113,10 @@ class GPTLanguageModel(nn.Module):
     def generate(self, idx, max_token):
         # idx is (B,T) array of indices in the current context
         for _ in range(max_token):
+            # crop idx to the last block_size tokens
+            idx_cond = idx[:, -block_size:]
             # get the predictions
-            logits, _ = self(idx)
+            logits, _ = self(idx_cond)
             # focus only on the last time step
             logits = logits[:, -1, :]  # (B,C)
             # apply softmax to get probabilities
@@ -115,7 +144,7 @@ for iter in range(max_iters):
     # evaluate the loss on train and val data
     if iter % eval_interval == 0:
         out = estimate_loss(model)
-        print(f"iter {iter:4d}, train loss: {out['train']:.2f}, val loss: {out['val']:.2f}")
+        print(f"iter {iter:4d}, train loss: {out['train']:.4f}, val loss: {out['val']:.4f}")
 
 # generate from the model
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
