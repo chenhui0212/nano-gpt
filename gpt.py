@@ -114,10 +114,12 @@ class Block(nn.Module):
         head_dim = embed_dim // head_num
         self.multi_head = MultiHead(head_num, head_dim)
         self.feed_forward = FeedForward(embed_dim, ff_dim)
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
 
     def forward(self, input):
-        input = input + self.multi_head(input)
-        input = input + self.feed_forward(input)
+        input = input + self.multi_head(self.norm1(input))
+        input = input + self.feed_forward(self.norm2(input))
         return input
 
 class GPTLanguageModel(nn.Module):
@@ -129,6 +131,7 @@ class GPTLanguageModel(nn.Module):
             Block(embed_dim, head_num, ff_dim),
             Block(embed_dim, head_num, ff_dim),
             Block(embed_dim, head_num, ff_dim),
+            nn.LayerNorm(embed_dim),
         )
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
