@@ -13,6 +13,8 @@ eval_iters = 200
 embed_dim = 32
 head_num = 4
 ff_dim = 4 * embed_dim
+attn_block_num = 3
+dropout = 0.1
 
 torch.manual_seed(1337)
 
@@ -64,6 +66,7 @@ class Head(nn.Module):
         self.query = nn.Linear(embed_dim, head_dim, bias=False)
         self.key = nn.Linear(embed_dim, head_dim, bias=False)
         self.value = nn.Linear(embed_dim, head_dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
         self.scale_factor = head_dim ** 0.5
 
     def forward(self, input, attn_mask=None):
@@ -80,6 +83,7 @@ class Head(nn.Module):
         # perform the weighted aggregation of the values
         probs = F.softmax(scores, dim=-1)
         out = probs @ values
+        out = self.dropout(out)
         return out
 
 class MultiHead(nn.Module):
@@ -102,10 +106,13 @@ class FeedForward(nn.Module):
             nn.Linear(ff_dim, embed_dim),
         )
         self.proj = nn.Linear(embed_dim, embed_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, input):
         out = self.net(input)
-        return self.proj(out)
+        out = self.proj(out)
+        out = self.dropout(out)
+        return out
 
 
 class Block(nn.Module):
@@ -128,11 +135,9 @@ class GPTLanguageModel(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         self.positional_encoding = nn.Embedding(block_size, embed_dim)
         self.blocks = nn.Sequential(
-            Block(embed_dim, head_num, ff_dim),
-            Block(embed_dim, head_num, ff_dim),
-            Block(embed_dim, head_num, ff_dim),
-            nn.LayerNorm(embed_dim),
+            *[Block(embed_dim, head_num, ff_dim) for _ in range(attn_block_num)]
         )
+        self.norm = nn.LayerNorm(embed_dim)
         self.lm_head = nn.Linear(embed_dim, vocab_size)
 
     def forward(self, idx, targets=None):
